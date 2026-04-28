@@ -1,0 +1,10 @@
+{
+  "python.defaultInterpreterPath": ".\\backend\\venv\\Scripts\\python.exe",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}\\backend"
+  ],
+  "editor.formatOnSave": true,
+  "python.analysis.typeCheckingMode": "basic",
+  "python.languageServer": "Pylance",
+  "css.lint.unknownAtRules": "ignore"
+}
