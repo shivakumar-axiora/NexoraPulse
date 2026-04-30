@@ -33,10 +33,12 @@ from routes.utils     import router as utils_router
 from routes.ai        import router as ai_router
 
 
-# ── Create tables ─────────────────────────────────────────────────────────────
-# In production, replace this with Alembic migrations.
-Base.metadata.create_all(bind=engine)
+from init_db import init
 
+# ── Create database & tables ──────────────────────────────────────────────────
+# This mimics Hibernate's 'hbm2ddl.auto=update' behavior by automatically 
+# creating the DB and tables on application startup.
+init()
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
