@@ -61,6 +61,7 @@ export default function SurveyRespond() {
   const [fbBusy, setFbBusy] = useState(false);
   const [err,   setErr]   = useState(null);
   const [email, setEmail] = useState('');
+  const [demographics, setDemographics] = useState({ age: '', gender: '', occupation: '' });
   const [saved, setSaved] = useState(null);
   const [orgName, setOrgName] = useState('');
 
@@ -125,6 +126,7 @@ export default function SurveyRespond() {
         session_token: token.current,
         respondent_email: email || null,
         status: 'in_progress',
+        ...demographics
       });
       rId.current = res.data.id;
       return res.data.id;
@@ -175,8 +177,11 @@ export default function SurveyRespond() {
       const quality = await tracker.onSubmit(ans, qs);
       await autoSave(ans, id);
       // Update email if collected at end
-      if (sv?.require_email && email) {
-        await API.patch(`/responses/${id}`, { respondent_email: email });
+      if ((sv?.require_email && email) || sv?.collect_demographics) {
+        await API.patch(`/responses/${id}`, { 
+          respondent_email: email || undefined,
+          ...demographics
+        });
       }
       await API.post(`/responses/${id}/submit`, { metadata: { quality_score: quality } });
       setDone(true);
@@ -188,15 +193,26 @@ export default function SurveyRespond() {
   // ── Navigation ────────────────────────────────────────────────────────────
   function goTo(n) { setDir(n > step ? 1 : -1); setStep(n); }
   function goNext() {
+    if (step === -1) {
+      const first = nextVisible(-1);
+      setDir(1); setStep(first ?? 0);
+      if (first !== null) tracker.onEnter(qs[first]?.id);
+      return;
+    }
     const q = qs[step];
     if (q?.is_required && !ans[q.id]) return toast.error('This question is required');
     if (q) tracker.onLeave(q.id);
     const next = nextVisible(step);
     if (next !== null) { setDir(1); setStep(next); tracker.onEnter(qs[next]?.id); }
+    else if (sv?.collect_demographics && step !== -0.5) { setDir(1); setStep(-0.5); }
     else { setDir(1); setStep(qs.length); }
   }
   function goBack() {
-    if (step === qs.length) { setDir(-1); const last = prevVisible(qs.length - 1) ?? qs.length - 1; setStep(last); return; }
+    if (step === qs.length) {
+      if (sv?.collect_demographics) { setDir(-1); setStep(-0.5); return; }
+      setDir(-1); const last = prevVisible(qs.length - 1) ?? qs.length - 1; setStep(last); return;
+    }
+    if (step === -0.5) { setDir(-1); const last = prevVisible(qs.length - 1) ?? qs.length - 1; setStep(last); return; }
     if (step >= 0 && qs[step]) tracker.onLeave(qs[step].id);
     tracker.onBack();
     setDir(-1);
@@ -211,7 +227,14 @@ export default function SurveyRespond() {
     const onKey = e => {
       if (e.key !== 'Enter' || e.target.tagName === 'TEXTAREA') return;
       if (step === qs.length && sv?.require_email) { if (email) submit(); return; }
-      if (step >= 0 && step < qs.length) { nextVisible(step) === null ? (sv?.require_email ? setStep(qs.length) : submit()) : goNext(); }
+      if (step === -0.5 && sv?.collect_demographics) { sv?.require_email ? setStep(qs.length) : submit(); return; }
+      if (step >= 0 && step < qs.length) {
+        const next = nextVisible(step);
+        if (next !== null) goNext();
+        else if (sv?.collect_demographics) setStep(-0.5);
+        else if (sv?.require_email) setStep(qs.length);
+        else submit();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -223,11 +246,12 @@ export default function SurveyRespond() {
   const tc         = sv?.theme_color || '#FF4500';
   const q          = qs[step];
   const onWelcome  = step === -1;
-  const pct        = step >= 0 ? progressAt(step) : 0;
+  const onDemo     = step === -0.5;
+  const pct        = step >= 0 ? progressAt(step) : (step === -0.5 || step === qs.length) ? 98 : 0;
   const visPos     = step >= 0 ? visibleQuestions.findIndex(vq => vq.id === q?.id) + 1 : 0;
   const visTotal   = visibleQuestions.length;
   const isLast     = step >= 0 && step < qs.length && nextVisible(step) === null;
-  const canBack    = step > 0 || (step === 0 && sv?.welcome_message) || step === qs.length;
+  const canBack    = step > 0 || step === -0.5 || (step === 0 && sv?.welcome_message) || step === qs.length;
   const remaining  = useMemo(() => visibleQuestions.filter(vq => !ans[vq.id]), [visibleQuestions, ans]);
 
   // ── Error state ───────────────────────────────────────────────────────────
@@ -512,17 +536,89 @@ export default function SurveyRespond() {
                 )}
                 <motion.div initial={{ opacity:0, y:12 }} animate={{ opacity:1, y:0 }} transition={{ delay:0.44 }} style={{ marginTop:36 }}>
                   <motion.button whileHover={{ scale:1.02, y:-2 }} whileTap={{ scale:0.97 }}
-                    onClick={() => {
-                      setDir(1);
-                      const first = qs.findIndex(q => visibleQuestions.some(vq => vq.id === q.id));
-                      const idx = first >= 0 ? first : 0;
-                      setStep(idx); tracker.onEnter(qs[idx]?.id);
-                    }}
+                    onClick={goNext}
                     style={{ display:'inline-flex', alignItems:'center', gap:10, padding:'15px 44px', borderRadius:999, border:'none', background:tc, color:'#fff', fontFamily:'Syne,sans-serif', fontWeight:700, fontSize:12, letterSpacing:'0.12em', textTransform:'uppercase', cursor:'pointer', boxShadow:`0 8px 40px ${tc}40` }}>
                     Begin
                     <Icons.Arrow style={{ color:'currentColor' }} />
                   </motion.button>
                 </motion.div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* DEMOGRAPHICS */}
+          {step === -0.5 && (
+            <motion.div key="demographics" custom={dir} variants={variants} initial="enter" animate="show" exit="exit" transition={spring}
+              style={{ position:'absolute', inset:0, overflowY:'auto', overflowX:'hidden' }}>
+              <div style={{ minHeight:'100%', display:'flex', alignItems:'center', justifyContent:'center', padding:'32px 40px' }}>
+                <div style={{ width:'100%', maxWidth:580 }}>
+                  <motion.div initial={{ opacity:0, y:10 }} animate={{ opacity:1, y:0 }} transition={{ delay:0.05 }}
+                    style={{ display:'inline-flex', alignItems:'center', gap:8, padding:'5px 14px', borderRadius:999, border:`1px solid ${tc}2E`, background:`${tc}0D`, marginBottom:28 }}>
+                    <span style={{ fontFamily:'Syne,sans-serif', fontSize:9, fontWeight:700, letterSpacing:'0.18em', textTransform:'uppercase', color:tc }}>
+                      Tell us about yourself
+                    </span>
+                  </motion.div>
+                  <motion.h2 initial={{ opacity:0, y:20 }} animate={{ opacity:1, y:0 }} transition={{ delay:0.12, duration:0.55, ease:[0.16,1,0.3,1] }}
+                    style={{ fontFamily:'Playfair Display,serif', fontWeight:900, fontSize:'clamp(28px,5vw,48px)', letterSpacing:'-2px', color:fg, lineHeight:1.05, marginBottom:16 }}>
+                    Demographics
+                  </motion.h2>
+                  <motion.p initial={{ opacity:0 }} animate={{ opacity:1 }} transition={{ delay:0.22 }}
+                    style={{ fontFamily:'Fraunces,serif', fontWeight:300, fontSize:16, color:sub, lineHeight:1.65, marginBottom:42 }}>
+                    This information helps us better understand the diversity of our respondents. This section is optional.
+                  </motion.p>
+
+                  <div style={{ display:'flex', flexDirection:'column', gap:40 }}>
+                    {/* AGE */}
+                    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+                      <label style={{ fontFamily:'Syne,sans-serif', fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:sub }}>Age Range</label>
+                      <div style={{ display:'flex', flexWrap:'wrap', gap:10 }}>
+                        {['18-24', '25-34', '35-44', '45-54', '55-64', '65+'].map(v => (
+                          <button key={v} onClick={() => setDemographics(d => ({ ...d, age: d.age === v ? '' : v }))}
+                            style={{ padding:'10px 20px', borderRadius:99, border: demographics.age === v ? `1.5px solid ${tc}` : '1.5px solid rgba(22,15,8,0.1)', background: demographics.age === v ? `${tc}08` : 'none', color: demographics.age === v ? tc : fg, fontFamily:'Fraunces,serif', fontSize:15, cursor:'pointer', transition:'all 0.2s' }}>
+                            {v}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* GENDER */}
+                    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+                      <label style={{ fontFamily:'Syne,sans-serif', fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:sub }}>Gender</label>
+                      <div style={{ display:'flex', flexWrap:'wrap', gap:10 }}>
+                        {['Male', 'Female', 'Non-binary', 'Prefer not to say'].map(v => (
+                          <button key={v} onClick={() => setDemographics(d => ({ ...d, gender: d.gender === v ? '' : v }))}
+                            style={{ padding:'10px 20px', borderRadius:99, border: demographics.gender === v ? `1.5px solid ${tc}` : '1.5px solid rgba(22,15,8,0.1)', background: demographics.gender === v ? `${tc}08` : 'none', color: demographics.gender === v ? tc : fg, fontFamily:'Fraunces,serif', fontSize:15, cursor:'pointer', transition:'all 0.2s' }}>
+                            {v}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* OCCUPATION */}
+                    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+                      <label style={{ fontFamily:'Syne,sans-serif', fontSize:11, fontWeight:700, letterSpacing:'0.14em', textTransform:'uppercase', color:sub }}>Occupation</label>
+                      <input value={demographics.occupation} onChange={e => setDemographics(d => ({ ...d, occupation: e.target.value }))}
+                        placeholder="e.g. Designer"
+                        style={{ width:'100%', boxSizing:'border-box', padding:'12px 18px', background:'rgba(22,15,8,0.03)', border:'1.2px solid rgba(22,15,8,0.08)', borderRadius:12, fontFamily:'Fraunces,serif', fontSize:16, color:fg, outline:'none' }} />
+                    </div>
+                  </div>
+
+                  {/* Nav */}
+                  <div style={{ marginTop:64, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                    <button onClick={goBack}
+                      style={{ display:'flex', alignItems:'center', gap:7, fontFamily:'Syne,sans-serif', fontWeight:700, fontSize:10, letterSpacing:'0.12em', textTransform:'uppercase', color:sub, background:'none', border:'none', cursor:'pointer' }}>
+                      <Icons.Arrow d="M19 12H5M12 19l-7-7 7-7" style={{ color:'currentColor' }} />
+                      Back
+                    </button>
+                    <motion.button whileHover={{ scale:1.02, y:-1 }} whileTap={{ scale:0.97 }} onClick={() => { sv?.require_email ? setStep(qs.length) : submit(); }}
+                      style={{ display:'flex', alignItems:'center', gap:8, padding:'14px 44px', borderRadius:999, border:'none', background:fg, color: dark ? '#100B05' : '#F7F5F0', fontFamily:'Syne,sans-serif', fontWeight:700, fontSize:11, letterSpacing:'0.12em', textTransform:'uppercase', cursor:'pointer', transition:'all 0.25s' }}
+                      onMouseEnter={e => { e.currentTarget.style.background = tc; e.currentTarget.style.color = '#fff'; e.currentTarget.style.boxShadow = `0 8px 32px ${tc}40`; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = fg; e.currentTarget.style.color = dark ? '#100B05' : '#F7F5F0'; e.currentTarget.style.boxShadow = 'none'; }}>
+                      {sv?.require_email ? 'Continue' : 'Submit'}
+                      <Icons.Arrow style={{ color:'currentColor' }} />
+                    </motion.button>
+                  </div>
+                </div>
               </div>
             </motion.div>
           )}
@@ -590,7 +686,16 @@ export default function SurveyRespond() {
                         </motion.button>
                       ) : sv?.require_email ? (
                         <motion.button whileHover={{ scale:1.02, y:-1 }} whileTap={{ scale:0.97 }}
-                          onClick={() => { if (q?.is_required && !ans[q.id]) return toast.error('This question is required'); setDir(1); setStep(qs.length); }}
+                          onClick={() => { if (q?.is_required && !ans[q.id]) return toast.error('This question is required'); setDir(1); if (sv?.collect_demographics) setStep(-0.5); else setStep(qs.length); }}
+                          style={{ display:'flex', alignItems:'center', gap:8, padding:'14px 36px', borderRadius:999, border:'none', background:fg, color: dark ? '#100B05' : '#F7F5F0', fontFamily:'Syne,sans-serif', fontWeight:700, fontSize:11, letterSpacing:'0.12em', textTransform:'uppercase', cursor:'pointer', transition:'background 0.25s, box-shadow 0.25s' }}
+                          onMouseEnter={e => { e.currentTarget.style.background = tc; e.currentTarget.style.color = '#fff'; e.currentTarget.style.boxShadow = `0 8px 32px ${tc}40`; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = fg; e.currentTarget.style.color = dark ? '#100B05' : '#F7F5F0'; e.currentTarget.style.boxShadow = 'none'; }}>
+                          Almost done
+                          <Icons.Arrow style={{ color:'currentColor' }} />
+                        </motion.button>
+                      ) : sv?.collect_demographics ? (
+                        <motion.button whileHover={{ scale:1.02, y:-1 }} whileTap={{ scale:0.97 }}
+                          onClick={() => { if (q?.is_required && !ans[q.id]) return toast.error('This question is required'); setDir(1); setStep(-0.5); }}
                           style={{ display:'flex', alignItems:'center', gap:8, padding:'14px 36px', borderRadius:999, border:'none', background:fg, color: dark ? '#100B05' : '#F7F5F0', fontFamily:'Syne,sans-serif', fontWeight:700, fontSize:11, letterSpacing:'0.12em', textTransform:'uppercase', cursor:'pointer', transition:'background 0.25s, box-shadow 0.25s' }}
                           onMouseEnter={e => { e.currentTarget.style.background = tc; e.currentTarget.style.color = '#fff'; e.currentTarget.style.boxShadow = `0 8px 32px ${tc}40`; }}
                           onMouseLeave={e => { e.currentTarget.style.background = fg; e.currentTarget.style.color = dark ? '#100B05' : '#F7F5F0'; e.currentTarget.style.boxShadow = 'none'; }}>

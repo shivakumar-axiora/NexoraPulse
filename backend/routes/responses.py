@@ -17,7 +17,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks, status
+import httpx
 from sqlalchemy.orm import Session, joinedload
 
 from db.database import get_db
@@ -44,12 +45,42 @@ def _load_response(response_id: uuid.UUID, db: Session) -> SurveyResponse:
     return r
 
 
+async def _resolve_geo_ip(response_id: uuid.UUID, ip: str, db_factory):
+    """
+    Background task to resolve IP to City using ip-api.com (Free).
+    """
+    if not ip or ip in ("127.0.0.1", "::1"):
+        return
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"http://ip-api.com/json/{ip}?fields=status,city")
+            data = resp.json()
+            if data.get("status") == "success" and data.get("city"):
+                # Use a new session for the background task
+                db = db_factory()
+                try:
+                    r = db.query(SurveyResponse).filter(SurveyResponse.id == response_id).first()
+                    if r and not r.city:  # Only update if city wasn't provided manually
+                        r.city = data["city"]
+                        db.commit()
+                finally:
+                    db.close()
+    except Exception as e:
+        print(f"Geo-IP lookup failed: {e}")
+
+
 
 
 # ── Create ────────────────────────────────────────────────────────────────────
 
 @router.post("/", response_model=ResponseOut, status_code=status.HTTP_201_CREATED)
-def create_response(body: ResponseCreate, db: Session = Depends(get_db)):
+def create_response(
+    request: Request, 
+    body: ResponseCreate, 
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
     """
     Create a new in-progress response row.
     Called by SurveyRespond.jsx → ensureR() when the user first interacts.
@@ -92,10 +123,21 @@ def create_response(body: ResponseCreate, db: Session = Depends(get_db)):
         respondent_email=body.respondent_email,
         status=ResponseStatusEnum.in_progress,
         started_at=datetime.now(timezone.utc),
+        age=body.age,
+        gender=body.gender,
+        city=body.city,
+        occupation=body.occupation,
+        client_ip=request.client.host if request.client else None,
     )
     db.add(row)
     db.commit()
     db.refresh(row)
+
+    # 3. Schedule Geo-IP lookup if city is missing and we have an IP
+    if not row.city and row.client_ip:
+        from db.database import SessionLocal
+        background_tasks.add_task(_resolve_geo_ip, row.id, row.client_ip, SessionLocal)
+
     return ResponseOut.model_validate(row)
 
 
@@ -152,6 +194,16 @@ def update_response(
         r.last_saved_at = body.last_saved_at
     if body.metadata is not None:
         r.response_metadata = body.metadata
+    
+    # Update Demographics
+    if body.age is not None:
+        r.age = body.age
+    if body.gender is not None:
+        r.gender = body.gender
+    if body.city is not None:
+        r.city = body.city
+    if body.occupation is not None:
+        r.occupation = body.occupation
 
     db.commit()
     db.refresh(r)

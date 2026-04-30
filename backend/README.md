@@ -32,7 +32,7 @@ cp .env.example .env
 
 **On Windows:**
 ```bash
-copy .env.example .env
+cp .env.example .env
 ```
 
 # Edit .env and set your DATABASE_URL and SECRET_KEY

@@ -103,7 +103,7 @@ export default function SurveyEdit() {
     }
     setBusy(true);
     try {
-      const meta = { title:sv.title,description:sv.description||null,welcome_message:sv.welcome_message||null,thank_you_message:sv.thank_you_message||null,expires_at:sv.expires_at||null,allow_anonymous:sv.allow_anonymous,require_email:sv.require_email,show_progress_bar:sv.show_progress_bar,theme_color:sv.theme_color };
+      const meta = { title:sv.title,description:sv.description||null,welcome_message:sv.welcome_message||null,thank_you_message:sv.thank_you_message||null,expires_at:sv.expires_at||null,allow_anonymous:sv.allow_anonymous,require_email:sv.require_email,show_progress_bar:sv.show_progress_bar,collect_demographics:sv.collect_demographics,theme_color:sv.theme_color };
       await API.patch(`/surveys/${id}`, meta);
       
       const qPayload = qs.map((q, i) => ({
@@ -718,6 +718,7 @@ export default function SurveyEdit() {
               {[
                 { k:'allow_anonymous',l:'Anonymous responses',d:"Respondents don't need to identify themselves",ico:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>},
                 { k:'require_email',l:'Require email address',d:'Collect respondent emails before they begin',ico:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>},
+                { k:'collect_demographics',l:'Collect Demographics',d:'Ask for age, gender and occupation',ico:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>},
                 { k:'show_progress_bar',l:'Show progress bar',d:'Display a completion indicator to respondents',ico:<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>},
               ].map(x => (
                 <div key={x.k}

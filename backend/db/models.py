@@ -126,6 +126,7 @@ class Survey(Base):
     allow_anonymous   = Column(Boolean, default=True)
     require_email     = Column(Boolean, default=False)
     show_progress_bar = Column(Boolean, default=True)
+    collect_demographics = Column(Boolean, default=False)
     theme_color       = Column(String(20), default="#FF4500")
     slug              = Column(String(50), unique=True, nullable=False)
     status            = Column(SAEnum(SurveyStatusEnum), default=SurveyStatusEnum.draft)
@@ -184,6 +185,17 @@ class SurveyResponse(Base):
     completed_at      = Column(DateTime(timezone=True), nullable=True)
     last_saved_at     = Column(DateTime(timezone=True), nullable=True)
     response_metadata = Column("metadata", JSONB, nullable=True)
+
+    @property
+    def metadata_dict(self):
+        return self.response_metadata
+
+    # Demographics
+    age               = Column(String(50), nullable=True)
+    gender            = Column(String(50), nullable=True)
+    city              = Column(String(100), nullable=True)
+    occupation        = Column(String(100), nullable=True)
+    client_ip         = Column(String(45), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("session_token", name="uq_survey_response_session_token"),

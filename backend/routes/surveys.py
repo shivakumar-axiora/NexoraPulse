@@ -36,7 +36,7 @@ from db.models import (
 from schemas import (
     SurveyCreate, SurveyUpdate, SurveyOut, SurveyStatusUpdate,
     QuestionIn, QuestionOut, SurveyShareCreate, SurveyShareOut, MessageResponse,
-    ResponseOut, AnswerOut, FeedbackOut,
+    ResponseOut, AnswerOut, FeedbackOut, DemographicsReport
 )
 from dependencies import get_current_user
 
@@ -204,6 +204,7 @@ def create_survey(
         allow_anonymous=body.allow_anonymous,
         require_email=body.require_email,
         show_progress_bar=body.show_progress_bar,
+        collect_demographics=body.collect_demographics,
         theme_color=body.theme_color,
         slug=slug,
         status=sv_status,
@@ -455,6 +456,7 @@ def duplicate_survey(
         allow_anonymous=original.allow_anonymous,
         require_email=original.require_email,
         show_progress_bar=original.show_progress_bar,
+        collect_demographics=original.collect_demographics,
         theme_color=original.theme_color,
         slug=new_slug,
         status=SurveyStatusEnum.draft,
@@ -656,3 +658,47 @@ def create_survey_feedback(
     db.add(fb)
     db.commit()
     return {"message": "Feedback received"}
+
+
+# ── Analytics & Demographics ──────────────────────────────────────────────────
+
+@router.get("/{survey_id}/analytics/demographics", response_model=DemographicsReport)
+def get_survey_demographics(
+    survey_id: uuid.UUID,
+    current_user: UserProfile = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Returns demographic distribution for a survey's responses.
+    Restricted to survey creator or tenant admins.
+    """
+    from db.models import ResponseStatusEnum
+    
+    # Verify access
+    survey = db.query(Survey).filter(Survey.id == survey_id).first()
+    if not survey:
+        raise HTTPException(status_code=404, detail="Survey not found")
+    
+    # Simple check: must belong to the same tenant
+    if survey.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    def get_counts(column):
+        results = (
+            db.query(column, func.count(SurveyResponse.id))
+            .filter(
+                SurveyResponse.survey_id == survey_id,
+                SurveyResponse.status == ResponseStatusEnum.completed,
+                column != None
+            )
+            .group_by(column)
+            .all()
+        )
+        return [{"label": str(r[0]), "count": r[1]} for r in results]
+
+    return DemographicsReport(
+        age_distribution=get_counts(SurveyResponse.age),
+        gender_distribution=get_counts(SurveyResponse.gender),
+        city_distribution=get_counts(SurveyResponse.city),
+        occupation_distribution=get_counts(SurveyResponse.occupation)
+    )
